@@ -127,8 +127,13 @@ func (p *OpenCodeProvider) fetchSessionsByDirectory(ctx context.Context) (map[st
 		return nil, fmt.Errorf("failed to list sessions from opencode: %w", err)
 	}
 
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" {
+		return map[string]listedSession{}, nil
+	}
+
 	var listed []listedSession
-	if err := json.Unmarshal(out, &listed); err != nil {
+	if err := json.Unmarshal([]byte(trimmed), &listed); err != nil {
 		return nil, fmt.Errorf("failed to decode opencode session JSON: %w", err)
 	}
 
