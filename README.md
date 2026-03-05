@@ -7,13 +7,20 @@
 ### Option 1: Install with Go
 
 ```bash
-go install github.com/<your-github-username>/quack/cmd/quack@latest
+go install github.com/SmolNero/quack/cmd/quack@latest
 ```
 
-### Option 2: Build from source
+### Option 2: Install with Homebrew
 
 ```bash
-git clone https://github.com/<your-github-username>/quack.git
+brew tap SmolNero/quack
+brew install quack
+```
+
+### Option 3: Build from source
+
+```bash
+git clone https://github.com/SmolNero/quack.git
 cd quack
 go build -o quack ./cmd/quack
 mv quack /usr/local/bin/quack
