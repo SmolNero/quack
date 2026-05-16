@@ -13,7 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"quack/internal/sessions"
+	"github.com/SmolNero/quack/internal/sessions"
 )
 
 const refreshEvery = 4 * time.Second
