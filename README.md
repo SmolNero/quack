@@ -14,13 +14,6 @@
 go install github.com/SmolNero/quack/cmd/quack@latest
 ```
 
-### Option 2: Install with Homebrew
-
-```bash
-brew tap SmolNero/quack
-brew install quack
-```
-
 ### Option 3: Build from source
 
 ```bash
