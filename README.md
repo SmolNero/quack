@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/quack_logo_v2.png" alt="quack_logo" width="770" style="max-width: 100%; height: auto;" />
+</p>
+
 # quack
 
 `quack` is a terminal UI for viewing active OpenCode sessions and cancelling them.
