@@ -83,9 +83,12 @@ func (p *OpenCodeProvider) ListActive(ctx context.Context) ([]ActiveSession, err
 	return active, nil
 }
 
-func (p *OpenCodeProvider) Cancel(_ context.Context, session ActiveSession) error {
+func (p *OpenCodeProvider) Cancel(ctx context.Context, session ActiveSession) error {
 	if session.PID <= 0 {
 		return errors.New("missing process ID")
+	}
+	if err := p.validateSessionProcess(ctx, session); err != nil {
+		return err
 	}
 
 	proc, err := os.FindProcess(session.PID)
@@ -111,6 +114,30 @@ func (p *OpenCodeProvider) Cancel(_ context.Context, session ActiveSession) erro
 	}
 
 	return nil
+}
+
+func (p *OpenCodeProvider) validateSessionProcess(ctx context.Context, session ActiveSession) error {
+	procs, err := p.fetchOpenCodeProcesses(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, proc := range procs {
+		if proc.pid != session.PID {
+			continue
+		}
+
+		if session.Command != "" && proc.command != session.Command {
+			return fmt.Errorf("PID %d no longer matches the selected session", session.PID)
+		}
+		if session.Directory != "" && session.Directory != "unknown" && proc.cwd != "unknown" && proc.cwd != session.Directory {
+			return fmt.Errorf("PID %d is now running in a different directory", session.PID)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("PID %d is no longer an active OpenCode session", session.PID)
 }
 
 type listedSession struct {

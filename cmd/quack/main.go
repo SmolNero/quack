@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"quack/internal/sessions"
-	"quack/internal/ui"
+	"github.com/SmolNero/quack/internal/sessions"
+	"github.com/SmolNero/quack/internal/ui"
 )
 
 func main() {

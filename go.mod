@@ -1,4 +1,4 @@
-module quack
+module github.com/SmolNero/quack
 
 go 1.24.6
 
