@@ -3,7 +3,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -14,10 +13,13 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/SmolNero/quack/internal/sessions"
+	"github.com/SmolNero/quack/internal/usage"
 )
 
-const refreshEvery = 4 * time.Second
-const duckEvery = 220 * time.Millisecond
+const (
+	refreshEvery      = 4 * time.Second
+	usageRefreshEvery = time.Minute
+)
 
 var (
 	pageStyle = lipgloss.NewStyle().Padding(0, 2)
@@ -37,6 +39,15 @@ var (
 
 	detailKeyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#73827B"))
 	detailValStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#4A5852"))
+	usageCardStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#C7D6CE")).
+			Padding(0, 1)
+	usageLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#50615A")).Bold(true)
+	usageGoodStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#60976F"))
+	usageWarnStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#C4944C"))
+	usageLowStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#D66A70"))
+	usageEmptyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D8DEDA"))
 
 	confirmStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
@@ -44,25 +55,7 @@ var (
 			Background(lipgloss.Color("#F5F9F6")).
 			Foreground(lipgloss.Color("#50615A")).
 			Padding(1, 2)
-
-	duckBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#D64C4C"))
-	duckWingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#B43C3C"))
-	duckBeakStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8B44D"))
-	duckEyeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#1F1F1F"))
 )
-
-var duckFrames = [2]string{
-	"      __\n" +
-		"  ___(e )>\n" +
-		" /   w   \\\n" +
-		"(  wwww   )\n" +
-		" \\_______/",
-	"      __\n" +
-		"  ___(e )>\n" +
-		" /  wwww \\\n" +
-		"(    w    )\n" +
-		" \\_______/",
-}
 
 type keyMap struct {
 	Up      key.Binding
@@ -99,30 +92,42 @@ type cancelMsg struct {
 	pid int
 }
 
-type tickMsg time.Time
-type duckTickMsg time.Time
-
-type Model struct {
-	provider sessions.Provider
-	table    table.Model
-	help     help.Model
-
-	sessions   []sessions.ActiveSession
-	loading    bool
-	confirming bool
-	err        error
-	status     string
-	lastSync   time.Time
-	width      int
-	height     int
-	duckFrame  int
+type usageMsg struct {
+	weekly usage.Weekly
+	err    error
+	at     time.Time
 }
 
-func NewModel(provider sessions.Provider) Model {
+type tickMsg time.Time
+type usageTickMsg time.Time
+
+type Model struct {
+	provider      sessions.Provider
+	usageProvider usage.Provider
+	table         table.Model
+	help          help.Model
+
+	sessions      []sessions.ActiveSession
+	weekly        usage.Weekly
+	loading       bool
+	usageLoading  bool
+	confirming    bool
+	err           error
+	usageErr      error
+	status        string
+	lastSync      time.Time
+	usageLastSync time.Time
+	width         int
+	height        int
+}
+
+func NewModel(provider sessions.Provider, usageProvider usage.Provider) Model {
 	columns := []table.Column{
 		{Title: "PID", Width: 7},
-		{Title: "Session", Width: 18},
-		{Title: "Where", Width: 30},
+		{Title: "Session name", Width: 36},
+		{Title: "RAM (RSS)", Width: 10},
+		{Title: "CPU", Width: 7},
+		{Title: "Cache", Width: 10},
 		{Title: "Age", Width: 9},
 	}
 
@@ -145,11 +150,19 @@ func NewModel(provider sessions.Provider) Model {
 	h.Styles.ShortKey = lipgloss.NewStyle().Foreground(lipgloss.Color("#6A7A73"))
 	h.Styles.ShortDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B9A93"))
 
-	return Model{provider: provider, table: t, help: h, loading: true, status: "Loading active sessions..."}
+	return Model{
+		provider:      provider,
+		usageProvider: usageProvider,
+		table:         t,
+		help:          h,
+		loading:       true,
+		usageLoading:  true,
+		status:        "Loading active sessions...",
+	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(refreshCmd(m.provider), tickCmd(), duckTickCmd())
+	return tea.Batch(refreshCmd(m.provider), usageRefreshCmd(m.usageProvider), tickCmd(), usageTickCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -188,8 +201,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			m.loading = true
+			m.usageLoading = true
+			m.usageErr = nil
 			m.status = "Refreshing..."
-			return m, refreshCmd(m.provider)
+			return m, tea.Batch(refreshCmd(m.provider), usageRefreshCmd(m.usageProvider))
 		case "c":
 			if len(m.sessions) > 0 {
 				m.confirming = true
@@ -229,6 +244,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		return m, refreshCmd(m.provider)
 
+	case usageMsg:
+		m.usageLoading = false
+		m.usageErr = typed.err
+		if typed.err == nil {
+			m.weekly = typed.weekly
+			m.usageLastSync = typed.at
+		}
+
 	case tickMsg:
 		if !m.loading && !m.confirming {
 			m.loading = true
@@ -236,9 +259,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, tickCmd()
 
-	case duckTickMsg:
-		m.duckFrame = (m.duckFrame + 1) % len(duckFrames)
-		return m, duckTickCmd()
+	case usageTickMsg:
+		m.usageLoading = true
+		m.usageErr = nil
+		return m, tea.Batch(usageRefreshCmd(m.usageProvider), usageTickCmd())
 	}
 
 	var cmd tea.Cmd
@@ -252,8 +276,7 @@ func (m Model) View() string {
 	}
 
 	count := len(m.sessions)
-	places := locationCount(m.sessions)
-	header := headerStyle.Render(fmt.Sprintf("quack  •  %d active  •  %d location%s", count, places, plural(places)))
+	header := headerStyle.Render(fmt.Sprintf("quack  •  %d active  •  %s RAM", count, formatBytes(totalMemory(m.sessions))))
 
 	stamp := "never"
 	if !m.lastSync.IsZero() {
@@ -269,23 +292,20 @@ func (m Model) View() string {
 
 	helpText := m.help.View(keys)
 	detail := m.detailView()
-	duck := m.duckView()
+	weekly := m.usageView()
 	confirm := ""
 	if m.confirming {
 		sel := m.selected()
 		label := "selected session"
 		if sel != nil {
-			label = fmt.Sprintf("PID %d in %s", sel.PID, shortPath(sel.Directory))
+			label = fmt.Sprintf("%q (PID %d)", trimText(sel.Title, 36), sel.PID)
 		}
 		confirm = confirmStyle.Render(fmt.Sprintf("Cancel %s? [y/N]", label))
 	}
 
-	reserve := lipgloss.Height(top) + lipgloss.Height(status) + lipgloss.Height(helpText)
+	reserve := lipgloss.Height(top) + lipgloss.Height(weekly) + lipgloss.Height(status) + lipgloss.Height(helpText)
 	if confirm != "" {
 		reserve += lipgloss.Height(confirm)
-	}
-	if duck != "" {
-		reserve += lipgloss.Height(duck)
 	}
 
 	showDetail := true
@@ -305,18 +325,11 @@ func (m Model) View() string {
 		body = cardStyle.Render("No running OpenCode process found.")
 	}
 
-	sections := []string{top, body}
+	sections := []string{top, weekly, body}
 	if showDetail {
 		sections = append(sections, detail)
 	}
 	sections = append(sections, status, helpText)
-	if duck != "" {
-		rightWidth := m.width - 4
-		if rightWidth < 20 {
-			rightWidth = 20
-		}
-		sections = append(sections, lipgloss.PlaceHorizontal(rightWidth, lipgloss.Right, duck))
-	}
 	if confirm != "" {
 		sections = append(sections, confirm)
 	}
@@ -333,32 +346,38 @@ func (m *Model) resizeTable() {
 	}
 
 	pidW := 7
+	memoryW := 10
+	cpuW := 7
+	cacheW := 10
 	ageW := 9
-	sessionW := 18
-	whereW := width - pidW - ageW - sessionW - 8
-	if whereW < 20 {
-		whereW = 20
+	sessionW := width - pidW - memoryW - cpuW - cacheW - ageW - 12
+	if sessionW < 20 {
+		sessionW = 20
 	}
 
 	cols := m.table.Columns()
 	cols[0].Width = pidW
 	cols[1].Width = sessionW
-	cols[2].Width = whereW
-	cols[3].Width = ageW
+	cols[2].Width = memoryW
+	cols[3].Width = cpuW
+	cols[4].Width = cacheW
+	cols[5].Width = ageW
 	m.table.SetColumns(cols)
 }
 
 func rowsFromSessions(active []sessions.ActiveSession) []table.Row {
 	rows := make([]table.Row, 0, len(active))
 	for _, item := range active {
-		sid := item.SessionID
-		if sid == "" {
-			sid = "unknown"
+		title := item.Title
+		if title == "" {
+			title = "Unidentified session"
 		}
 		rows = append(rows, table.Row{
 			fmt.Sprintf("%d", item.PID),
-			trimID(sid),
-			shortPath(item.Directory),
+			title,
+			formatBytes(item.Memory),
+			fmt.Sprintf("%.1f%%", item.CPU),
+			formatTokens(item.CacheRead + item.CacheWrite),
 			time.Since(item.StartedAt).Round(time.Second).String(),
 		})
 	}
@@ -407,11 +426,11 @@ func (m Model) detailView() string {
 
 	session := sel.SessionID
 	if session == "" {
-		session = "unknown"
+		session = "not available"
 	}
 	title := sel.Title
 	if title == "" {
-		title = "No title available"
+		title = "Unidentified session"
 	}
 
 	updated := "unknown"
@@ -427,9 +446,70 @@ func (m Model) detailView() string {
 		line("title", title),
 		line("session", session),
 		line("directory", sel.Directory),
+		line("resources", fmt.Sprintf("%s RSS | %.1f%% CPU", formatBytes(sel.Memory), sel.CPU)),
+		line("tokens", fmt.Sprintf("%s input | %s output | %s reasoning", formatTokens(sel.Input), formatTokens(sel.Output), formatTokens(sel.Reasoning))),
+		line("cache", fmt.Sprintf("%s read | %s write", formatTokens(sel.CacheRead), formatTokens(sel.CacheWrite))),
 		line("updated", updated),
 		line("command", trimText(sel.Command, 64)),
 	}, "\n"))
+}
+
+func (m Model) usageView() string {
+	width := m.width - 10
+	if width < 24 {
+		width = 24
+	}
+
+	if m.usageLastSync.IsZero() {
+		message := "Weekly usage: loading..."
+		if m.usageErr != nil {
+			message = trimText("Weekly usage unavailable: "+m.usageErr.Error(), width)
+		}
+		return usageCardStyle.Width(width).Render(message)
+	}
+
+	remaining := m.weekly.RemainingPercent()
+	percent := int(remaining + 0.5)
+	levelStyle := usageGoodStyle
+	if remaining <= 20 {
+		levelStyle = usageLowStyle
+	} else if remaining <= 50 {
+		levelStyle = usageWarnStyle
+	}
+
+	left := usageLabelStyle.Render("Weekly usage") + "  " + levelStyle.Render(fmt.Sprintf("%d%% remaining", percent))
+	reset := "reset time unavailable"
+	if !m.weekly.ResetAt.IsZero() {
+		reset = "resets " + m.weekly.ResetAt.In(time.Local).Format("Mon Jan 2, 3:04 PM")
+	}
+	checked := "checked " + m.usageLastSync.In(time.Local).Format("3:04 PM")
+	if m.usageErr != nil {
+		checked = "update failed"
+	} else if m.usageLoading {
+		checked = "updating"
+	}
+	right := statusStyle.Render(reset + "  •  " + checked)
+
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	summary := left + "\n" + right
+	if gap >= 2 {
+		summary = left + strings.Repeat(" ", gap) + right
+	}
+
+	barWidth := width
+	if barWidth > 64 {
+		barWidth = 64
+	}
+	filled := int((remaining/100)*float64(barWidth) + 0.5)
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := levelStyle.Render(strings.Repeat("█", filled)) + usageEmptyStyle.Render(strings.Repeat("░", barWidth-filled))
+
+	return usageCardStyle.Width(width).Render(summary + "\n" + bar)
 }
 
 func refreshCmd(provider sessions.Provider) tea.Cmd {
@@ -439,6 +519,16 @@ func refreshCmd(provider sessions.Provider) tea.Cmd {
 
 		active, err := provider.ListActive(ctx)
 		return refreshMsg{sessions: active, err: err, at: time.Now()}
+	}
+}
+
+func usageRefreshCmd(provider usage.Provider) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		defer cancel()
+
+		weekly, err := provider.Weekly(ctx)
+		return usageMsg{weekly: weekly, err: err, at: time.Now()}
 	}
 }
 
@@ -458,32 +548,18 @@ func tickCmd() tea.Cmd {
 	})
 }
 
-func duckTickCmd() tea.Cmd {
-	return tea.Tick(duckEvery, func(t time.Time) tea.Msg {
-		return duckTickMsg(t)
+func usageTickCmd() tea.Cmd {
+	return tea.Tick(usageRefreshEvery, func(t time.Time) tea.Msg {
+		return usageTickMsg(t)
 	})
 }
 
-func locationCount(items []sessions.ActiveSession) int {
-	if len(items) == 0 {
-		return 0
-	}
-	uniq := make(map[string]struct{}, len(items))
+func totalMemory(items []sessions.ActiveSession) int64 {
+	var total int64
 	for _, item := range items {
-		uniq[item.Directory] = struct{}{}
+		total += item.Memory
 	}
-	return len(uniq)
-}
-
-func shortPath(path string) string {
-	if path == "" {
-		return "unknown"
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && strings.HasPrefix(path, home) {
-		path = strings.Replace(path, home, "~", 1)
-	}
-	return trimText(path, 42)
+	return total
 }
 
 func trimText(value string, limit int) string {
@@ -496,8 +572,31 @@ func trimText(value string, limit int) string {
 	return value[:limit-3] + "..."
 }
 
-func trimID(id string) string {
-	return trimText(id, 16)
+func formatBytes(value int64) string {
+	const unit = int64(1024)
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+
+	div, exp := unit, 0
+	for n := value / unit; n >= unit && exp < 3; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(value)/float64(div), "KMGT"[exp])
+}
+
+func formatTokens(value int64) string {
+	switch {
+	case value >= 1_000_000_000:
+		return fmt.Sprintf("%.1fB", float64(value)/1_000_000_000)
+	case value >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
+	case value >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(value)/1_000)
+	default:
+		return fmt.Sprintf("%d", value)
+	}
 }
 
 func plural(n int) string {
@@ -505,38 +604,4 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
-}
-
-func (m Model) duckView() string {
-	if len(duckFrames) == 0 {
-		return ""
-	}
-	frame := duckFrames[m.duckFrame%len(duckFrames)]
-	return renderDuckFrame(frame)
-}
-
-func renderDuckFrame(frame string) string {
-	lines := strings.Split(frame, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		var b strings.Builder
-		for i := 0; i < len(line); i++ {
-			ch := line[i]
-			switch ch {
-			case ' ':
-				b.WriteByte(ch)
-			case 'e':
-				b.WriteString(duckEyeStyle.Render("o"))
-			case '>':
-				b.WriteString(duckBeakStyle.Render(string(ch)))
-			case 'w':
-				b.WriteString(duckWingStyle.Render("~"))
-			default:
-				b.WriteString(duckBodyStyle.Render(string(ch)))
-			}
-		}
-		out = append(out, b.String())
-	}
-
-	return strings.Join(out, "\n")
 }
