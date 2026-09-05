@@ -1,7 +1,6 @@
 .DS_Store
 FIXME/
 /quack
-<<<<<<< HEAD
 
 # Local credentials and runtime data
 .env
@@ -16,5 +15,3 @@ credentials.json
 *.db
 *.db-*
 *.sqlite*
-=======
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353

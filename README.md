@@ -13,8 +13,8 @@
 - Labels an idle OpenCode home screen as `No session selected`.
 - Displays live resident memory (RSS), CPU, process age, and cumulative token-cache use.
 - Sorts sessions by RAM use, highest first, to make cleanup decisions quick.
-- Shows the current weekly Codex allowance, remaining percentage, and reset time.
-- Refreshes process data every 4 seconds and weekly usage every minute.
+- Shows the current five-hour and weekly Codex allowances, remaining percentages, and reset times.
+- Refreshes process data every 4 seconds and Codex usage every minute.
 - Refreshes everything immediately when `r` is pressed.
 - Confirms the session title and PID before terminating a process.
 
@@ -44,15 +44,15 @@ quack
 ```
 
 - `j` / `k` or arrow keys: move selection
-- `r`: refresh sessions and weekly usage
+- `r`: refresh sessions and Codex usage
 - `c`: cancel selected session
 - `q`: quit
 
 Rows are ordered by resident memory. Selecting a row shows its full session ID, directory, token totals, cache reads/writes, update time, and command.
 
-## Weekly Usage
+## Codex Usage
 
-Quack reads the existing OpenCode OpenAI OAuth credential and requests the current Codex balance directly from ChatGPT. It does not print or copy the access token. The reset time is shown in your local timezone.
+Quack reads the existing OpenCode OpenAI OAuth credential and requests the current five-hour and weekly Codex balances directly from ChatGPT. It does not print or copy the access token. Reset times are shown in your local timezone.
 
 Log in through OpenCode if the usage card reports that authentication is unavailable:
 
@@ -78,7 +78,7 @@ Reload Kitty's configuration with `ctrl+shift+f5` after changing it. Quack perfo
 - macOS with `ps`
 - Go 1.24+
 - OpenCode 1.17.18+ available as `opencode` in `PATH`
-- Optional: an OpenAI OAuth login in OpenCode for the weekly usage card
+- Optional: an OpenAI OAuth login in OpenCode for the Codex limits card
 
 ## Development
 

@@ -10,10 +10,7 @@ import (
 
 	"github.com/SmolNero/quack/internal/sessions"
 	"github.com/SmolNero/quack/internal/ui"
-<<<<<<< HEAD
 	"github.com/SmolNero/quack/internal/usage"
-=======
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353
 )
 
 func main() {

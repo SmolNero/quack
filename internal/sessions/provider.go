@@ -127,7 +127,6 @@ func (p *OpenCodeProvider) ListActive(ctx context.Context) ([]ActiveSession, err
 	return active, nil
 }
 
-<<<<<<< HEAD
 func applySessionDetails(item *ActiveSession, details listedSession) {
 	item.SessionID = details.ID
 	item.Title = details.Title
@@ -142,8 +141,6 @@ func applySessionDetails(item *ActiveSession, details listedSession) {
 	}
 }
 
-=======
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353
 func (p *OpenCodeProvider) Cancel(ctx context.Context, session ActiveSession) error {
 	if session.PID <= 0 {
 		return errors.New("missing process ID")
@@ -191,7 +188,6 @@ func (p *OpenCodeProvider) validateSessionProcess(ctx context.Context, session A
 		if session.Command != "" && proc.command != session.Command {
 			return fmt.Errorf("PID %d no longer matches the selected session", session.PID)
 		}
-<<<<<<< HEAD
 		if !session.StartedAt.IsZero() {
 			offset := proc.startedAt.Sub(session.StartedAt)
 			if offset < 0 {
@@ -200,26 +196,12 @@ func (p *OpenCodeProvider) validateSessionProcess(ctx context.Context, session A
 			if offset > 2*time.Second {
 				return fmt.Errorf("PID %d now belongs to a different process", session.PID)
 			}
-=======
-		if session.Directory != "" && session.Directory != "unknown" && proc.cwd != "unknown" && proc.cwd != session.Directory {
-			return fmt.Errorf("PID %d is now running in a different directory", session.PID)
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353
 		}
 
 		return nil
 	}
 
 	return fmt.Errorf("PID %d is no longer an active OpenCode session", session.PID)
-<<<<<<< HEAD
-=======
-}
-
-type listedSession struct {
-	ID        string `json:"id"`
-	Title     string `json:"title"`
-	Updated   int64  `json:"updated"`
-	Directory string `json:"directory"`
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353
 }
 
 type listedSession struct {

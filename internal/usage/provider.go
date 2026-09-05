@@ -15,13 +15,13 @@ import (
 
 const usageEndpoint = "https://chatgpt.com/backend-api/wham/usage"
 
-type Weekly struct {
+type Window struct {
 	UsedPercent float64
 	ResetAt     time.Time
 	Window      time.Duration
 }
 
-func (w Weekly) RemainingPercent() float64 {
+func (w Window) RemainingPercent() float64 {
 	remaining := 100 - w.UsedPercent
 	if remaining < 0 {
 		return 0
@@ -32,8 +32,13 @@ func (w Weekly) RemainingPercent() float64 {
 	return remaining
 }
 
+type Limits struct {
+	FiveHour *Window
+	Weekly   *Window
+}
+
 type Provider interface {
-	Weekly(ctx context.Context) (Weekly, error)
+	Limits(ctx context.Context) (Limits, error)
 }
 
 type OpenAIProvider struct {
@@ -71,15 +76,15 @@ type usageWindow struct {
 	ResetAt           int64   `json:"reset_at"`
 }
 
-func (p *OpenAIProvider) Weekly(ctx context.Context) (Weekly, error) {
+func (p *OpenAIProvider) Limits(ctx context.Context) (Limits, error) {
 	cred, err := p.readCredential()
 	if err != nil {
-		return Weekly{}, err
+		return Limits{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.endpoint, nil)
 	if err != nil {
-		return Weekly{}, fmt.Errorf("create weekly usage request: %w", err)
+		return Limits{}, fmt.Errorf("create usage request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+cred.Access)
 	req.Header.Set("User-Agent", "quack")
@@ -89,37 +94,59 @@ func (p *OpenAIProvider) Weekly(ctx context.Context) (Weekly, error) {
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return Weekly{}, fmt.Errorf("fetch weekly usage: %w", err)
+		return Limits{}, fmt.Errorf("fetch usage: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Weekly{}, fmt.Errorf("fetch weekly usage: %s", resp.Status)
+		return Limits{}, fmt.Errorf("fetch usage: %s", resp.Status)
 	}
 
 	var payload usageResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
-		return Weekly{}, fmt.Errorf("decode weekly usage: %w", err)
+		return Limits{}, fmt.Errorf("decode usage: %w", err)
 	}
 
-	window := payload.RateLimit.Primary
-	if payload.RateLimit.Secondary != nil && (window == nil || payload.RateLimit.Secondary.LimitWindow > window.LimitWindow) {
-		window = payload.RateLimit.Secondary
+	now := time.Now()
+	primary := makeWindow(payload.RateLimit.Primary, now)
+	secondary := makeWindow(payload.RateLimit.Secondary, now)
+	if primary == nil && secondary == nil {
+		return Limits{}, errors.New("usage windows are unavailable")
 	}
+
+	limits := Limits{}
+	switch {
+	case primary != nil && secondary != nil && primary.Window <= secondary.Window:
+		limits.FiveHour, limits.Weekly = primary, secondary
+	case primary != nil && secondary != nil:
+		limits.FiveHour, limits.Weekly = secondary, primary
+	case primary != nil && primary.Window >= 24*time.Hour:
+		limits.Weekly = primary
+	case primary != nil:
+		limits.FiveHour = primary
+	case secondary.Window >= 24*time.Hour:
+		limits.Weekly = secondary
+	default:
+		limits.FiveHour = secondary
+	}
+	return limits, nil
+}
+
+func makeWindow(window *usageWindow, now time.Time) *Window {
 	if window == nil {
-		return Weekly{}, errors.New("weekly usage window is unavailable")
+		return nil
 	}
 
-	var resetAt time.Time
+	resetAt := time.Time{}
 	if window.ResetAt > 0 {
 		resetAt = time.Unix(window.ResetAt, 0)
 	} else if window.ResetAfterSeconds > 0 {
-		resetAt = time.Now().Add(time.Duration(window.ResetAfterSeconds) * time.Second)
+		resetAt = now.Add(time.Duration(window.ResetAfterSeconds) * time.Second)
 	}
-	return Weekly{
+	return &Window{
 		UsedPercent: window.UsedPercent,
 		ResetAt:     resetAt,
 		Window:      time.Duration(window.LimitWindow) * time.Second,
-	}, nil
+	}
 }
 
 func (p *OpenAIProvider) readCredential() (credential, error) {

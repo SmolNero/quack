@@ -37,14 +37,29 @@ func TestUsageFormatting(t *testing.T) {
 func TestUsageView(t *testing.T) {
 	m := Model{
 		width: 100,
-		weekly: usage.Weekly{
-			UsedPercent: 89,
-			ResetAt:     time.Date(2026, 8, 7, 21, 39, 0, 0, time.Local),
+		limits: usage.Limits{
+			FiveHour: &usage.Window{
+				UsedPercent: 8,
+				ResetAt:     time.Date(2026, 8, 6, 14, 15, 0, 0, time.Local),
+			},
+			Weekly: &usage.Window{
+				UsedPercent: 89,
+				ResetAt:     time.Date(2026, 8, 7, 21, 39, 0, 0, time.Local),
+			},
 		},
 		usageLastSync: time.Date(2026, 8, 6, 8, 15, 0, 0, time.Local),
 	}
 
 	view := m.usageView()
+	if !strings.Contains(view, "5-hour usage") || !strings.Contains(view, "92%") {
+		t.Fatalf("usage view does not show the five-hour limit: %q", view)
+	}
+	if !strings.Contains(view, "resets 2:15 PM") {
+		t.Fatalf("usage view does not show the five-hour reset time: %q", view)
+	}
+	if !strings.Contains(view, "Weekly usage") {
+		t.Fatalf("usage view does not show the weekly limit: %q", view)
+	}
 	if !strings.Contains(view, "11% remaining") {
 		t.Fatalf("usage view does not show the remaining percentage: %q", view)
 	}

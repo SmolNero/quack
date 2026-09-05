@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestWeeklyUsesLongestRateLimitWindow(t *testing.T) {
+func TestLimitsReturnsFiveHourAndWeeklyWindows(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer not-a-real-token" {
 			t.Errorf("Authorization = %q", got)
@@ -34,10 +34,27 @@ func TestWeeklyUsesLongestRateLimitWindow(t *testing.T) {
 	}
 
 	provider := &OpenAIProvider{authPath: authPath, endpoint: server.URL, client: server.Client()}
-	weekly, err := provider.Weekly(context.Background())
+	limits, err := provider.Limits(context.Background())
 	if err != nil {
-		t.Fatalf("Weekly returned an error: %v", err)
+		t.Fatalf("Limits returned an error: %v", err)
 	}
+	if limits.FiveHour == nil {
+		t.Fatal("five-hour window is nil")
+	}
+	if limits.FiveHour.UsedPercent != 20 || limits.FiveHour.RemainingPercent() != 80 {
+		t.Fatalf("five-hour usage = %.1f%% used / %.1f%% remaining", limits.FiveHour.UsedPercent, limits.FiveHour.RemainingPercent())
+	}
+	if limits.FiveHour.Window != 5*time.Hour {
+		t.Fatalf("five-hour window = %s, want 5 hours", limits.FiveHour.Window)
+	}
+	if got := limits.FiveHour.ResetAt.Unix(); got != 1786000000 {
+		t.Fatalf("five-hour reset = %d, want 1786000000", got)
+	}
+
+	if limits.Weekly == nil {
+		t.Fatal("weekly window is nil")
+	}
+	weekly := limits.Weekly
 	if weekly.UsedPercent != 89 || weekly.RemainingPercent() != 11 {
 		t.Fatalf("usage = %.1f%% used / %.1f%% remaining", weekly.UsedPercent, weekly.RemainingPercent())
 	}

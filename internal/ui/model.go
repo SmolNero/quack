@@ -13,10 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/SmolNero/quack/internal/sessions"
-<<<<<<< HEAD
 	"github.com/SmolNero/quack/internal/usage"
-=======
->>>>>>> bb6579af04679718e00f1b5cb47321370f2e0353
 )
 
 const (
@@ -96,7 +93,7 @@ type cancelMsg struct {
 }
 
 type usageMsg struct {
-	weekly usage.Weekly
+	limits usage.Limits
 	err    error
 	at     time.Time
 }
@@ -111,7 +108,7 @@ type Model struct {
 	help          help.Model
 
 	sessions      []sessions.ActiveSession
-	weekly        usage.Weekly
+	limits        usage.Limits
 	loading       bool
 	usageLoading  bool
 	confirming    bool
@@ -251,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usageLoading = false
 		m.usageErr = typed.err
 		if typed.err == nil {
-			m.weekly = typed.weekly
+			m.limits = typed.limits
 			m.usageLastSync = typed.at
 		}
 
@@ -295,7 +292,7 @@ func (m Model) View() string {
 
 	helpText := m.help.View(keys)
 	detail := m.detailView()
-	weekly := m.usageView()
+	usagePanel := m.usageView()
 	confirm := ""
 	if m.confirming {
 		sel := m.selected()
@@ -306,7 +303,7 @@ func (m Model) View() string {
 		confirm = confirmStyle.Render(fmt.Sprintf("Cancel %s? [y/N]", label))
 	}
 
-	reserve := lipgloss.Height(top) + lipgloss.Height(weekly) + lipgloss.Height(status) + lipgloss.Height(helpText)
+	reserve := lipgloss.Height(top) + lipgloss.Height(usagePanel) + lipgloss.Height(status) + lipgloss.Height(helpText)
 	if confirm != "" {
 		reserve += lipgloss.Height(confirm)
 	}
@@ -328,7 +325,7 @@ func (m Model) View() string {
 		body = cardStyle.Render("No running OpenCode process found.")
 	}
 
-	sections := []string{top, weekly, body}
+	sections := []string{top, usagePanel, body}
 	if showDetail {
 		sections = append(sections, detail)
 	}
@@ -458,20 +455,39 @@ func (m Model) detailView() string {
 }
 
 func (m Model) usageView() string {
-	width := m.width - 10
-	if width < 24 {
-		width = 24
+	cardWidth := m.width - 10
+	if cardWidth < 24 {
+		cardWidth = 24
 	}
+	contentWidth := cardWidth - 2
 
 	if m.usageLastSync.IsZero() {
-		message := "Weekly usage: loading..."
+		message := "Codex limits  " + statusStyle.Render("loading...")
 		if m.usageErr != nil {
-			message = trimText("Weekly usage unavailable: "+m.usageErr.Error(), width)
+			message = trimText("Codex limits unavailable: "+m.usageErr.Error(), contentWidth)
 		}
-		return usageCardStyle.Width(width).Render(message)
+		return usageCardStyle.Width(cardWidth).Render(message)
 	}
 
-	remaining := m.weekly.RemainingPercent()
+	checked := "checked " + m.usageLastSync.In(time.Local).Format("3:04 PM")
+	if m.usageErr != nil {
+		checked = "update failed"
+	} else if m.usageLoading {
+		checked = "updating"
+	}
+	header := alignUsageLine(usageLabelStyle.Render("Codex limits"), statusStyle.Render(checked), contentWidth)
+
+	fiveHour := usageWindowView("5-hour usage", m.limits.FiveHour, contentWidth, "3:04 PM")
+	weekly := usageWindowView("Weekly usage", m.limits.Weekly, contentWidth, "Mon Jan 2, 3:04 PM")
+	return usageCardStyle.Width(cardWidth).Render(strings.Join([]string{header, fiveHour, "", weekly}, "\n"))
+}
+
+func usageWindowView(label string, window *usage.Window, width int, resetFormat string) string {
+	if window == nil {
+		return usageLabelStyle.Render(label) + "  " + statusStyle.Render("unavailable")
+	}
+
+	remaining := window.RemainingPercent()
 	percent := int(remaining + 0.5)
 	levelStyle := usageGoodStyle
 	if remaining <= 20 {
@@ -480,24 +496,12 @@ func (m Model) usageView() string {
 		levelStyle = usageWarnStyle
 	}
 
-	left := usageLabelStyle.Render("Weekly usage") + "  " + levelStyle.Render(fmt.Sprintf("%d%% remaining", percent))
+	left := usageLabelStyle.Render(label) + "  " + levelStyle.Bold(true).Render(fmt.Sprintf("%d%%", percent)) + statusStyle.Render(" remaining")
 	reset := "reset time unavailable"
-	if !m.weekly.ResetAt.IsZero() {
-		reset = "resets " + m.weekly.ResetAt.In(time.Local).Format("Mon Jan 2, 3:04 PM")
+	if !window.ResetAt.IsZero() {
+		reset = "resets " + window.ResetAt.In(time.Local).Format(resetFormat)
 	}
-	checked := "checked " + m.usageLastSync.In(time.Local).Format("3:04 PM")
-	if m.usageErr != nil {
-		checked = "update failed"
-	} else if m.usageLoading {
-		checked = "updating"
-	}
-	right := statusStyle.Render(reset + "  •  " + checked)
-
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	summary := left + "\n" + right
-	if gap >= 2 {
-		summary = left + strings.Repeat(" ", gap) + right
-	}
+	summary := alignUsageLine(left, statusStyle.Render(reset), width)
 
 	barWidth := width
 	if barWidth > 64 {
@@ -512,7 +516,15 @@ func (m Model) usageView() string {
 	}
 	bar := levelStyle.Render(strings.Repeat("█", filled)) + usageEmptyStyle.Render(strings.Repeat("░", barWidth-filled))
 
-	return usageCardStyle.Width(width).Render(summary + "\n" + bar)
+	return summary + "\n" + bar
+}
+
+func alignUsageLine(left, right string, width int) string {
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap >= 2 {
+		return left + strings.Repeat(" ", gap) + right
+	}
+	return left + "\n" + right
 }
 
 func refreshCmd(provider sessions.Provider) tea.Cmd {
@@ -530,8 +542,8 @@ func usageRefreshCmd(provider usage.Provider) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 		defer cancel()
 
-		weekly, err := provider.Weekly(ctx)
-		return usageMsg{weekly: weekly, err: err, at: time.Now()}
+		limits, err := provider.Limits(ctx)
+		return usageMsg{limits: limits, err: err, at: time.Now()}
 	}
 }
 
